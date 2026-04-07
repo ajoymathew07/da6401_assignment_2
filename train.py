@@ -139,6 +139,7 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate for optimizer")
     parser.add_argument("--dropout_p", type=float, default=0.5, help="Dropout probability")
     parser.add_argument("--wandb_project", type=str, default="", help="WandB project name")
+    parser.add_argument("--freeze_encoder", action="store_true", help="Whether to freeze encoder weights when training segmentation model")
     return parser.parse_args()
 
 # def compute_iou_metric(pred_boxes, target_boxes, eps = 1e-6):
@@ -253,12 +254,140 @@ def train_localization(args):
     wandb.finish()
     print(f"Best Val IoU: {best_val_iou:.4f}")
 
+
+def dice_score(pred_logits: torch.Tensor, target: torch.Tensor, num_classes: int = 3, eps: float = 1e-6) -> float:
+    preds = pred_logits.argmax(dim=1)
+    dice_sum = 0.0
+    for cls in range(num_classes):
+        pred_cls = (preds == cls).float()
+        target_cls = (target == cls).float()
+        intersection = (pred_cls * target_cls).sum()
+        dice_sum += (2 * intersection + eps) / (pred_cls.sum() + target_cls.sum() + eps)
+    return (dice_sum / num_classes).item()
+
+def pixel_accuracy(pred_logits: torch.Tensor, target: torch.Tensor) -> float:
+    preds = pred_logits.argmax(dim=1)
+    correct = (preds == target).float().sum()
+    total = target.numel()
+    return (correct / total).item()
+
+def train_segmentation(args):
+    from models.segmentation import VGG11UNet
+    import torch.utils.data as D
+
+    device = get_device()
+    print(f"Using device: {device}")
+    wandb.init(project= args.wandb_project,
+               name = f"task3_seg_dp{args.dropout_p}_bs{args.batch_size}_lr{args.lr}",
+               config = vars(args))
     
+    full_train = OxfordIIITPetDataset(root=args.data_root, split="trainval", download=True, augment=False)
+    val_size = int(0.1  * len(full_train))
+    train_size = len(full_train) - val_size
+    train_idx, val_idx = D.random_split(range(len(full_train)), [train_size, val_size],
+                                    generator=torch.Generator().manual_seed(42))
+    val_ds = D.Subset(full_train, list(val_idx))
+    train_aug = OxfordIIITPetDataset(root=args.data_root, split="trainval", download=False, augment=True)
+    train_ds = D.Subset(train_aug, list(train_idx))
+
+    pin_memory = device.type == "cuda"
+    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=pin_memory)
+    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=pin_memory)
+    print(f" Train: {len(train_ds)} samples, Val: {len(val_ds)} samples")
+
+    model = VGG11UNet(num_classes=3, dropout_p=args.dropout_p).to(device)
+
+    cls_ckpt = "checkpoints/classifier.pth"
+    if os.path.exists(cls_ckpt):
+        model.encoder.load_state_dict(torch.load(cls_ckpt, map_location=device)["state_dict"], strict=False)
+
+        if args.freeze_encoder:
+            for param in model.encoder.parameters():
+                param.requires_grad = False
+            print(" Encoder frozen - only decoder will be trained")
+        else:
+            print(" Full fine-tuning - entire network trainable")
+    else:
+        print(f" Warning: {cls_ckpt} not found - training from scratch.")
+    
+
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
+
+    best_val_dice = 0.0
+    for epoch in range(1, args.epochs + 1):
+        model.train()
+        train_loss , train_dice_sum , train_px_sum, n = 0.0, 0.0, 0.0, 0
+        for batch in train_loader:
+            images = batch["image"].to(device)
+            gt_masks = batch["mask"].to(device)
+
+            optimizer.zero_grad()
+            pred_logits = model(images)
+            loss = criterion(pred_logits, gt_masks)
+            loss.backward()
+            optimizer.step()
+
+            bs = images.size(0)
+            train_loss += loss.item() * bs
+            train_dice_sum += dice_score(pred_logits.detach(), gt_masks) * bs
+            train_px_sum += pixel_accuracy(pred_logits.detach(), gt_masks) * bs
+
+            n += bs
+        scheduler.step()
+        train_loss /= n
+        train_dice_avg = train_dice_sum / n
+        train_px_avg = train_px_sum / n
+
+        model.eval()
+        val_loss , val_dice_sum, val_px_sum, nv = 0.0, 0.0, 0.0, 0
+        with torch.no_grad():
+            for batch in val_loader:
+                images = batch["image"].to(device)
+                gt_masks = batch["mask"].to(device)
+
+                pred_logits = model(images)
+                loss = criterion(pred_logits, gt_masks)
+
+                bs = images.size(0)
+                val_loss += loss.item() * bs
+                val_dice_sum += dice_score(pred_logits, gt_masks) * bs
+                val_px_sum += pixel_accuracy(pred_logits, gt_masks) * bs
+                nv += bs
+
+        val_loss /= nv
+        val_dice_avg = val_dice_sum / nv
+        val_px_avg = val_px_sum / nv
+        print(f"Epoch {epoch:3d}/{args.epochs} | "
+        f"Train Loss: {train_loss:.4f} Dice: {train_dice_avg:.4f} Px: {train_px_avg:.4f} | "
+        f"Val Loss: {val_loss:.4f} Dice: {val_dice_avg:.4f} Px: {val_px_avg:.4f}")
+ 
+        wandb.log({
+            "epoch":          epoch,
+            "train/loss":     train_loss,
+            "train/dice":     train_dice_avg,
+            "train/px_acc":   train_px_avg,
+            "val/loss":       val_loss,
+            "val/dice":       val_dice_avg,
+            "val/px_acc":     val_px_avg,
+            "lr":             scheduler.get_last_lr()[0],
+        })
+ 
+        if val_dice_avg > best_val_dice:
+            best_val_dice = val_dice_avg
+            save_checkpoint(model, epoch, val_dice_avg, "checkpoints/unet.pth")
+ 
+    wandb.finish()
+    print(f"Best val Dice: {best_val_dice:.4f}")
+
 if __name__ == "__main__":
     args = parse_args()
     if args.task == "classification":
         train_classification(args)
     elif args.task == "localization":
         train_localization(args)
+    elif args.task == "segmentation":
+        train_segmentation(args)
     else:
         raise NotImplementedError(f"Task {args.task} not implemented yet.")
