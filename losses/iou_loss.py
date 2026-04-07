@@ -18,7 +18,10 @@ class IoULoss(nn.Module):
         super().__init__()
         self.eps = eps
         self.reduction = reduction
-        # TODO: validate reduction in {"none", "mean", "sum"}.
+        if reduction not in {"none", "mean", "sum"}:
+            raise ValueError(
+                f"Invalid reduction: {reduction}. Expected one of 'none', 'mean', or 'sum'."
+            )
 
     def forward(self, pred_boxes: torch.Tensor, target_boxes: torch.Tensor) -> torch.Tensor:
         """Compute IoU loss between predicted and target bounding boxes.
@@ -26,4 +29,44 @@ class IoULoss(nn.Module):
             pred_boxes: [B, 4] predicted boxes in (x_center, y_center, width, height) format.
             target_boxes: [B, 4] target boxes in (x_center, y_center, width, height) format."""
         # TODO: implement IoU loss.
-        raise NotImplementedError("Implement IoULoss.forward")
+        px, py= pred_boxes[:, 0], pred_boxes[:, 1]
+        pw = pred_boxes[:, 2].clamp(min = 0)
+        ph = pred_boxes[:, 3].clamp(min = 0)
+
+        
+        pred_x1 = px - pw /2
+        pred_x2 = px + pw/2
+        pred_y1 = py - ph/2
+        pred_y2 = py + ph/2
+
+        tx, ty = target_boxes[:, 0], target_boxes[:, 1]
+        tw = target_boxes[:, 2].clamp(min = 0)
+        th = target_boxes[:, 3].clamp(min = 0)
+
+        tgt_x1 = tx - tw /2
+        tgt_x2 = tx + tw/2
+        tgt_y1 = ty - th/2
+        tgt_y2 = ty + th/2
+
+        inter_x1 = torch.max(pred_x1, tgt_x1)
+        inter_x2 = torch.min(pred_x2, tgt_x2)
+        inter_y1 = torch.max(pred_y1, tgt_y1)
+        inter_y2 = torch.min(pred_y2, tgt_y2)
+
+        inter_w = (inter_x2 - inter_x1).clamp(min=0)
+        inter_h = (inter_y2 - inter_y1).clamp(min=0)
+        inter_area = inter_w * inter_h
+
+        pred_area = pw * ph
+        tgt_area = tw * th
+        union_area = pred_area + tgt_area - inter_area
+
+        iou = inter_area / (union_area + self.eps)
+        loss = 1.0 - iou
+
+        if self.reduction == "mean":
+            return loss.mean()
+        elif self.reduction == "sum":
+            return loss.sum()
+        else:
+            return loss

@@ -13,7 +13,11 @@ from models.vgg11 import VGG11Encoder
 
 
 def get_device():
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
 
 def save_checkpoint(model, epoch, metric, path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -137,9 +141,124 @@ def parse_args():
     parser.add_argument("--wandb_project", type=str, default="", help="WandB project name")
     return parser.parse_args()
 
+# def compute_iou_metric(pred_boxes, target_boxes, eps = 1e-6):
+#     px, py, pw, ph = pred_boxes[:, 0], pred_boxes[:, 1], pred_boxes[:, 2], pred_boxes[:, 3]
+#     tx, ty, tw, th = target_boxes[:, 0], target_boxes[:, 1], target_boxes[:, 2], target_boxes[:, 3]
+
+#     inter_x1 =  
+
+def train_localization(args):
+    from models.localization import VGG11Localizer
+    from losses.iou_loss import IoULoss
+    import torch.utils.data as D
+
+    device = get_device()
+    print(f"Using device: {device}")
+    wandb.init(project= args.wandb_project,
+               name = f"task2_loc_dp{args.dropout_p}_bs{args.batch_size}_lr{args.lr}",
+               config = vars(args))
+    
+    full_train = OxfordIIITPetDataset(root=args.data_root, split="trainval", download=True, augment=False)
+    val_size = int(0.1  * len(full_train))
+    train_size = len(full_train) - val_size
+
+    train_idx, val_idx = torch.utils.data.random_split(range(len(full_train)), [train_size, val_size],
+                                    generator=torch.Generator().manual_seed(42))
+    
+    val_ds = D.Subset(full_train, list(val_idx))
+
+    train_aug = OxfordIIITPetDataset(root=args.data_root, split="trainval", download=False, augment=True)
+    train_ds = D.Subset(train_aug, list(train_idx))
+
+    pin_memory = device.type == "cuda"
+    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=pin_memory)
+    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=pin_memory)
+    print(f" Train: {len(train_ds)} samples, Val: {len(val_ds)} samples")
+
+    model = VGG11Localizer(dropout_p=args.dropout_p).to(device)
+
+    cls_ckpt = "checkpoints/classifier.pth"
+    if os.path.exists(cls_ckpt):
+        model.load_encoder_weights(cls_ckpt, device=str(device))
+        print(f"Loaded encoder weights from {cls_ckpt}")
+    else:
+        print(f"Classifier checkpoint not found at {cls_ckpt}. Training localization model with random encoder weights.")
+
+    mse_criterion = nn.MSELoss()
+    iou_criterion = IoULoss(reduction= "none")
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
+
+    best_val_iou = 0.0
+    for epoch in range(1, args.epochs + 1):
+        model.train()
+        train_loss, train_iou_sum = 0.0, 0.0
+        n = 0
+        for batch in train_loader:
+            images = batch["image"].to(device)
+            gt_boxes = batch["bbox"].to(device)
+
+            optimizer.zero_grad()
+            preds = model(images)
+            per_sample_iou = iou_criterion(preds, gt_boxes)
+
+            mse_loss = mse_criterion(preds, gt_boxes)
+            loss = mse_loss + per_sample_iou.mean()  # Combine MSE and IoU losses 
+
+            loss.backward()
+            optimizer.step()
+
+            bs = images.size(0)
+
+            train_loss += loss.item() * bs
+            train_iou_sum += (1 - per_sample_iou.detach()).sum().item()  # IoU loss is 1 - IoU metric
+
+            n += bs
+
+        scheduler.step()
+        train_loss /= n
+        train_iou_avg = train_iou_sum / n
+
+        model.eval()
+        val_loss , val_iou_sum, nv = 0.0, 0.0, 0
+        with torch.no_grad():
+            for batch in val_loader:
+                images = batch["image"].to(device)
+                gt_boxes = batch["bbox"].to(device)
+
+                preds = model(images)
+                per_sample_iou = iou_criterion(preds, gt_boxes)
+
+                mse_loss = mse_criterion(preds, gt_boxes)
+                loss = mse_loss + per_sample_iou.mean()
+
+                bs = images.size(0)
+                val_loss += loss.item() * bs
+                val_iou_sum += (1 - per_sample_iou).sum().item()
+                nv += bs
+
+        val_loss /= nv
+        val_iou_avg = val_iou_sum / nv
+        print(f"Epoch {epoch:3d}/{args.epochs} | "
+              f"Train Loss: {train_loss:.4f} IoU: {train_iou_avg:.4f} | "
+              f"Val Loss: {val_loss:.4f} IoU: {val_iou_avg:.4f}")
+        wandb.log({"epoch": epoch, "train/loss": train_loss, "train/iou": train_iou_avg,
+                   "val/loss": val_loss, "val/iou": val_iou_avg, "lr": scheduler.get_last_lr()[0]})
+ 
+        if val_iou_avg > best_val_iou:
+            best_val_iou = val_iou_avg
+            save_checkpoint(model, epoch, val_iou_avg, "checkpoints/localizer.pth")
+
+    wandb.finish()
+    print(f"Best Val IoU: {best_val_iou:.4f}")
+
+    
 if __name__ == "__main__":
     args = parse_args()
     if args.task == "classification":
         train_classification(args)
+    elif args.task == "localization":
+        train_localization(args)
     else:
         raise NotImplementedError(f"Task {args.task} not implemented yet.")
