@@ -223,7 +223,6 @@ def train_localization(args):
     print(f" Train: {len(train_ds)} samples, Val: {len(val_ds)} samples")
 
     model = VGG11Localizer(dropout_p=args.dropout_p)
-    model = setup_model_for_multi_gpu(model, device)
 
     cls_ckpt = "checkpoints/classifier.pth"
     if os.path.exists(cls_ckpt):
@@ -238,6 +237,8 @@ def train_localization(args):
             print(f"Loaded encoder weights from {cls_ckpt} after downloading")
         else:
             print(f"Classifier checkpoint not found at {cls_ckpt}. Training localization model with random encoder weights.")
+
+    model = setup_model_for_multi_gpu(model, device)
 
     mse_criterion = nn.MSELoss()
     iou_criterion = IoULoss(reduction= "none")
@@ -352,7 +353,6 @@ def train_segmentation(args):
     print(f" Train: {len(train_ds)} samples, Val: {len(val_ds)} samples")
 
     model = VGG11UNet(num_classes=3, dropout_p=args.dropout_p)
-    model = setup_model_for_multi_gpu(model, device)
 
     cls_ckpt = "checkpoints/classifier.pth"
     if os.path.exists(cls_ckpt):
@@ -366,6 +366,8 @@ def train_segmentation(args):
             print(" Full fine-tuning - entire network trainable")
     else:
         print(f" Warning: {cls_ckpt} not found - training from scratch.")
+
+    model = setup_model_for_multi_gpu(model, device)
     
 
     criterion = nn.CrossEntropyLoss()
@@ -601,16 +603,17 @@ def train_multitask(args):
             best_combined = combined
             # Wrap each head's weights into the format the individual
             # task models expect (they load "encoder.*", "classifier.*", etc.)
-            cls_save = {**{f"encoder.{k}": v for k, v in model.encoder.state_dict().items()},
-                        **{f"classifier.{k.replace('fc.', '')}": v for k, v in model.cls_head.state_dict().items() if k.startswith("fc.")}}
+            model_module = model.module if hasattr(model, 'module') else model
+            cls_save = {**{f"encoder.{k}": v for k, v in model_module.encoder.state_dict().items()},
+                        **{f"classifier.{k.replace('fc.', '')}": v for k, v in model_module.cls_head.state_dict().items() if k.startswith("fc.")}}
             save_checkpoint(cls_save, epoch, v_acc,   "checkpoints/classifier.pth")
  
-            loc_save = {**{f"encoder.{k}": v for k, v in model.encoder.state_dict().items()},
-                        **{k: v for k, v in model.loc_head.state_dict().items()}}
+            loc_save = {**{f"encoder.{k}": v for k, v in model_module.encoder.state_dict().items()},
+                        **{k: v for k, v in model_module.loc_head.state_dict().items()}}
             save_checkpoint(loc_save, epoch, v_iou,   "checkpoints/localizer.pth")
  
-            unet_save = {**{f"encoder.{k}": v for k, v in model.encoder.state_dict().items()},
-                         **{k: v for k, v in model.seg_head.state_dict().items()}}
+            unet_save = {**{f"encoder.{k}": v for k, v in model_module.encoder.state_dict().items()},
+                         **{k: v for k, v in model_module.seg_head.state_dict().items()}}
             save_checkpoint(unet_save, epoch, v_dice, "checkpoints/unet.pth")
  
     wandb.finish()
