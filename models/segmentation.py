@@ -99,7 +99,12 @@ class VGG11UNet(nn.Module):
             k.replace("encoder.", ""): v
             for k, v in state.items() if k.startswith("encoder.")
         }
-        # Handle DataParallel models
-        encoder = self.encoder.module if hasattr(self.encoder, 'module') else self.encoder
-        encoder.load_state_dict(encoder_state, strict=True)
+        
+        missing, unexpected = self.encoder.load_state_dict(encoder_state, strict=True)
+        
+        if missing:
+            print(f"Warning: Missing keys in encoder state dict: {missing}")
+        if unexpected:
+            print(f"Warning: Unexpected keys in encoder state dict: {unexpected}")
+            
         print(f"Loaded encoder weights from {classifier_checkpoint_path}")

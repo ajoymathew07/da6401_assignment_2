@@ -160,10 +160,8 @@ class MultiTaskPerceptionModel(nn.Module):
         # Encoder
         enc_state = {k.replace("encoder.", ""): v
                      for k, v in cls_state.items() if k.startswith("encoder.")}
-        # Handle DataParallel models
-        encoder = self.encoder.module if hasattr(self.encoder, 'module') else self.encoder
-        encoder.load_state_dict(enc_state, strict=True)
-        print(f"  Encoder loaded from {classifier_path}")
+        missing, unexpected = self.encoder.load_state_dict(enc_state, strict=True)
+        print(f"  Encoder loaded from {classifier_path} | missing={missing} unexpected={unexpected}")
  
         # Classification head: keys are "classifier.0.weight", etc.
         # Our _ClassificationHead stores them under "fc.*"
