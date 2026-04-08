@@ -6,6 +6,8 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
 import wandb
+import random 
+import numpy as np
 
 from data.pets_dataset import OxfordIIITPetDataset
 from models.classification import VGG11Classifier
@@ -18,6 +20,25 @@ def get_device():
     if torch.backends.mps.is_available():
         return torch.device("mps")
     return torch.device("cpu")
+# 2) Add this utility section (near get_device or above training functions)
+def set_seed(seed: int = 42) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+
+    # deterministic behavior
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    torch.use_deterministic_algorithms(True, warn_only=True)
+
+
+def seed_worker(worker_id: int) -> None:
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
 
 def save_checkpoint(model, epoch, metric, path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -31,6 +52,8 @@ def save_checkpoint(model, epoch, metric, path):
 
 def train_classification(args):
     device = get_device()
+    set_seed(42)
+    g = torch.Generator().manual_seed(42)
     print(f"Using device: {device}")
 
     wandb.init(project= args.wandb_project,
@@ -44,7 +67,7 @@ def train_classification(args):
     val_size = int(0.1  * len(full_train))
     train_size = len(full_train) - val_size
     train_ds, val_ds = random_split(full_train, [train_size, val_size], 
-                                    generator=torch.Generator().manual_seed(42))
+                                    generator=g)
     
     train_full_aug = OxfordIIITPetDataset(root=args.data_root, split="trainval", download=False, augment=True)
 
@@ -52,8 +75,8 @@ def train_classification(args):
  
     train_ds = D.Subset(train_full_aug, train_ds.indices)
     pin_memory = device.type == "cuda"
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=pin_memory)
-    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=pin_memory)
+    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=pin_memory, worker_init_fn=seed_worker, generator=g)
+    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=pin_memory, worker_init_fn=seed_worker, generator=g)
 
     print(f" Train: {len(train_ds)} samples, Val: {len(val_ds)} samples, Test: {len(test_ds)} samples")
 
@@ -154,6 +177,10 @@ def train_localization(args):
     import torch.utils.data as D
 
     device = get_device()
+    set_seed(42)
+    g = torch.Generator().manual_seed(42)
+
+
     print(f"Using device: {device}")
     wandb.init(project= args.wandb_project,
                name = f"task2_loc_dp{args.dropout_p}_bs{args.batch_size}_lr{args.lr}",
@@ -164,7 +191,7 @@ def train_localization(args):
     train_size = len(full_train) - val_size
 
     train_idx, val_idx = torch.utils.data.random_split(range(len(full_train)), [train_size, val_size],
-                                    generator=torch.Generator().manual_seed(42))
+                                    generator=g)
     
     val_ds = D.Subset(full_train, list(val_idx))
 
@@ -172,8 +199,11 @@ def train_localization(args):
     train_ds = D.Subset(train_aug, list(train_idx))
 
     pin_memory = device.type == "cuda"
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=pin_memory)
-    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=pin_memory)
+    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=pin_memory,
+                              worker_init_fn=seed_worker, generator=g)
+
+    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=pin_memory,
+                            worker_init_fn=seed_worker, generator=g)
     print(f" Train: {len(train_ds)} samples, Val: {len(val_ds)} samples")
 
     model = VGG11Localizer(dropout_p=args.dropout_p).to(device)
@@ -205,7 +235,7 @@ def train_localization(args):
             per_sample_iou = iou_criterion(preds, gt_boxes)
 
             mse_loss = mse_criterion(preds, gt_boxes)
-            loss = mse_loss + per_sample_iou.mean()  # Combine MSE and IoU losses 
+            loss = mse_loss + 2.0 * per_sample_iou.mean()  # Combine MSE and IoU losses 
 
             loss.backward()
             optimizer.step()
@@ -232,7 +262,7 @@ def train_localization(args):
                 per_sample_iou = iou_criterion(preds, gt_boxes)
 
                 mse_loss = mse_criterion(preds, gt_boxes)
-                loss = mse_loss + per_sample_iou.mean()
+                loss = mse_loss + 2.0 * per_sample_iou.mean()
 
                 bs = images.size(0)
                 val_loss += loss.item() * bs
@@ -272,6 +302,8 @@ def pixel_accuracy(pred_logits: torch.Tensor, target: torch.Tensor) -> float:
     return (correct / total).item()
 
 def train_segmentation(args):
+    set_seed(42)
+    g = torch.Generator().manual_seed(42)
     from models.segmentation import VGG11UNet
     import torch.utils.data as D
 
@@ -285,21 +317,21 @@ def train_segmentation(args):
     val_size = int(0.1  * len(full_train))
     train_size = len(full_train) - val_size
     train_idx, val_idx = D.random_split(range(len(full_train)), [train_size, val_size],
-                                    generator=torch.Generator().manual_seed(42))
+                                    generator=g)
     val_ds = D.Subset(full_train, list(val_idx))
     train_aug = OxfordIIITPetDataset(root=args.data_root, split="trainval", download=False, augment=True)
     train_ds = D.Subset(train_aug, list(train_idx))
 
     pin_memory = device.type == "cuda"
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=pin_memory)
-    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=pin_memory)
+    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=pin_memory, worker_init_fn=seed_worker, generator=g)
+    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=pin_memory, worker_init_fn=seed_worker, generator=g)
     print(f" Train: {len(train_ds)} samples, Val: {len(val_ds)} samples")
 
     model = VGG11UNet(num_classes=3, dropout_p=args.dropout_p).to(device)
 
     cls_ckpt = "checkpoints/classifier.pth"
     if os.path.exists(cls_ckpt):
-        model.encoder.load_state_dict(torch.load(cls_ckpt, map_location=device)["state_dict"], strict=False)
+        model.load_encoder_weights(cls_ckpt, device=str(device))
 
         if args.freeze_encoder:
             for param in model.encoder.parameters():
@@ -312,7 +344,11 @@ def train_segmentation(args):
     
 
     criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    optimizer = torch.optim.Adam(
+        [p for p in model.parameters() if p.requires_grad],
+        lr=args.lr,
+        weight_decay=1e-4
+    )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
     best_val_dice = 0.0
@@ -381,6 +417,179 @@ def train_segmentation(args):
     wandb.finish()
     print(f"Best val Dice: {best_val_dice:.4f}")
 
+def train_multitask(args):
+    from models.multitask import MultiTaskPerceptionModel
+    from losses.iou_loss import IoULoss
+    import torch.utils.data as D
+
+    device = get_device()
+    set_seed(42)
+    g = torch.Generator().manual_seed(42)
+    print(f"Device: {device}")
+    
+    wandb.init(project= args.wandb_project,
+               name = f"task4_multitask_dp{args.dropout_p}_bs{args.batch_size}_lr{args.lr}",
+               config = vars(args))
+    
+    full_train = OxfordIIITPetDataset(root=args.data_root, split="trainval", download=True, augment=False)
+    val_size = int(0.1  * len(full_train))
+    train_size = len(full_train) - val_size
+
+    train_idx , val_idx = D.random_split(
+        range(len(full_train)), [train_size, val_size], generator=g
+    )
+
+    val_ds = D.Subset(full_train, list(val_idx))
+    train_aug = OxfordIIITPetDataset(root=args.data_root, split="trainval", download=False, augment=True)
+    train_ds = D.Subset(train_aug, list(train_idx))
+
+    pin_memory = device.type == "cuda"
+    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=pin_memory, worker_init_fn=seed_worker, generator=g)
+    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=pin_memory, worker_init_fn=seed_worker,generator=g )
+
+    print(f"Train: {len(train_ds)} | Val : {len(val_ds)}")
+
+    model = MultiTaskPerceptionModel(download= False).to(device)
+    cls_criterion = nn.CrossEntropyLoss()
+    seg_criterion = nn.CrossEntropyLoss()
+    mse_criterion = nn.MSELoss()
+    iou_criterion = IoULoss(reduction="none")
+ 
+    # Loss weights: balance the three tasks.
+    # Segmentation loss is pixel-averaged (large denominator) so it's naturally
+    # small; classification loss on 37 classes is larger. We scale so all three
+    # contribute meaningfully during early training.
+    W_CLS = 1.0
+    W_LOC = 1.0
+    W_SEG = 1.0
+ 
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
+ 
+    best_combined = 0.0   # track val cls_acc + dice for checkpoint
+ 
+    for epoch in range(1, args.epochs + 1):
+        # ---- Train --------------------------------------------------------
+        model.train()
+        (tl_cls, tl_loc, tl_seg, tl_total,
+         t_acc, t_iou, t_dice, n) = 0., 0., 0., 0., 0., 0., 0., 0
+ 
+        for batch in train_loader:
+            images = batch["image"].to(device)
+            labels = batch["label"].to(device)
+            bboxes = batch["bbox"].to(device)
+            masks  = batch["mask"].to(device)
+ 
+            optimizer.zero_grad()
+            out = model(images)
+ 
+            loss_cls = cls_criterion(out["classification"], labels)
+            iou_per  = iou_criterion(out["localization"], bboxes)
+            loss_loc = mse_criterion(out["localization"], bboxes) + iou_per.mean()
+            loss_seg = seg_criterion(out["segmentation"], masks)
+            loss     = W_CLS * loss_cls + W_LOC * loss_loc + W_SEG * loss_seg
+ 
+            loss.backward()
+            optimizer.step()
+ 
+            bs = images.size(0)
+            tl_cls   += loss_cls.item() * bs
+            tl_loc   += loss_loc.item() * bs
+            tl_seg   += loss_seg.item() * bs
+            tl_total += loss.item()     * bs
+            t_acc    += (out["classification"].argmax(1) == labels).sum().item()
+            t_iou    += (1 - iou_per.detach()).sum().item()
+            t_dice   += dice_score(out["segmentation"].detach(), masks) * bs
+            n        += bs
+ 
+        scheduler.step()
+        tl_cls /= n; tl_loc /= n; tl_seg /= n; tl_total /= n
+        t_acc  /= n; t_iou  /= n; t_dice /= n
+ 
+        # ---- Validate -----------------------------------------------------
+        model.eval()
+        (vl_cls, vl_loc, vl_seg, vl_total,
+         v_acc, v_iou, v_dice, nv) = 0., 0., 0., 0., 0., 0., 0., 0
+ 
+        with torch.no_grad():
+            for batch in val_loader:
+                images = batch["image"].to(device)
+                labels = batch["label"].to(device)
+                bboxes = batch["bbox"].to(device)
+                masks  = batch["mask"].to(device)
+ 
+                out = model(images)
+ 
+                loss_cls = cls_criterion(out["classification"], labels)
+                iou_per  = iou_criterion(out["localization"], bboxes)
+                loss_loc = mse_criterion(out["localization"], bboxes) + iou_per.mean()
+                loss_seg = seg_criterion(out["segmentation"], masks)
+                loss     = W_CLS * loss_cls + W_LOC * loss_loc + W_SEG * loss_seg
+ 
+                bs = images.size(0)
+                vl_cls   += loss_cls.item() * bs
+                vl_loc   += loss_loc.item() * bs
+                vl_seg   += loss_seg.item() * bs
+                vl_total += loss.item()     * bs
+                v_acc    += (out["classification"].argmax(1) == labels).sum().item()
+                v_iou    += (1 - iou_per).sum().item()
+                v_dice   += dice_score(out["segmentation"], masks) * bs
+                nv       += bs
+ 
+        vl_cls /= nv; vl_loc /= nv; vl_seg /= nv; vl_total /= nv
+        v_acc  /= nv; v_iou  /= nv; v_dice /= nv
+ 
+        print(
+            f"Epoch {epoch:3d}/{args.epochs} | "
+            f"Loss {tl_total:.3f}/{vl_total:.3f} | "
+            f"Cls {t_acc:.3f}/{v_acc:.3f} | "
+            f"IoU {t_iou:.3f}/{v_iou:.3f} | "
+            f"Dice {t_dice:.3f}/{v_dice:.3f}"
+        )
+ 
+        wandb.log({
+            "epoch":              epoch,
+            # Per-task losses
+            "train/loss_total":   tl_total,
+            "train/loss_cls":     tl_cls,
+            "train/loss_loc":     tl_loc,
+            "train/loss_seg":     tl_seg,
+            "val/loss_total":     vl_total,
+            "val/loss_cls":       vl_cls,
+            "val/loss_loc":       vl_loc,
+            "val/loss_seg":       vl_seg,
+            # Per-task metrics
+            "train/cls_acc":      t_acc,
+            "train/loc_iou":      t_iou,
+            "train/seg_dice":     t_dice,
+            "val/cls_acc":        v_acc,
+            "val/loc_iou":        v_iou,
+            "val/seg_dice":       v_dice,
+            "lr":                 scheduler.get_last_lr()[0],
+        })
+ 
+        # Save all three checkpoints from the unified model so that
+        # MultiTaskPerceptionModel can load them at inference time.
+        combined = v_acc + v_dice
+        if combined > best_combined:
+            best_combined = combined
+            # Wrap each head's weights into the format the individual
+            # task models expect (they load "encoder.*", "classifier.*", etc.)
+            cls_save = {**{f"encoder.{k}": v for k, v in model.encoder.state_dict().items()},
+                        **{f"classifier.{k.replace('fc.', '')}": v for k, v in model.cls_head.state_dict().items() if k.startswith("fc.")}}
+            save_checkpoint(cls_save, epoch, v_acc,   "checkpoints/classifier.pth")
+ 
+            loc_save = {**{f"encoder.{k}": v for k, v in model.encoder.state_dict().items()},
+                        **{k: v for k, v in model.loc_head.state_dict().items()}}
+            save_checkpoint(loc_save, epoch, v_iou,   "checkpoints/localizer.pth")
+ 
+            unet_save = {**{f"encoder.{k}": v for k, v in model.encoder.state_dict().items()},
+                         **{k: v for k, v in model.seg_head.state_dict().items()}}
+            save_checkpoint(unet_save, epoch, v_dice, "checkpoints/unet.pth")
+ 
+    wandb.finish()
+    print(f"Best combined (acc+dice): {best_combined:.4f}")
+
 if __name__ == "__main__":
     args = parse_args()
     if args.task == "classification":
@@ -389,5 +598,7 @@ if __name__ == "__main__":
         train_localization(args)
     elif args.task == "segmentation":
         train_segmentation(args)
+    elif args.task == "multitask":
+        train_multitask(args)
     else:
         raise NotImplementedError(f"Task {args.task} not implemented yet.")

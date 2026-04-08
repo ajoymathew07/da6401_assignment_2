@@ -116,10 +116,11 @@ class MultiTaskPerceptionModel(nn.Module):
         """
         import gdown
 #         https://drive.google.com/file/d/1aD-PFsrIDWMqFMd8QOBzuCEhQ1w4HN-9/view?usp=sharing
-# https://drive.google.com/file/d/1_p2i_i-bjo8AySK0kg2z0hyRfhND6xfO/view?usp=share_link
+
+# https://drive.google.com/file/d/1z5HxRX3Y4Ik3Qb6ryqj-9Z6RIviiKLol/view?usp=sharing
 # https://drive.google.com/file/d/1B4UKyuN5i-KOg8o3tB4BZCtwhuNCs5pe/view?usp=sharing
         gdown.download(id="1aD-PFsrIDWMqFMd8QOBzuCEhQ1w4HN-9", output=classifier_path, quiet=False)
-        gdown.download(id="1_p2i_i-bjo8AySK0kg2z0hyRfhND6xfO", output=localizer_path, quiet=False)
+        gdown.download(id="1z5HxRX3Y4Ik3Qb6ryqj-9Z6RIviiKLol", output=localizer_path, quiet=False)
         gdown.download(id="1B4UKyuN5i-KOg8o3tB4BZCtwhuNCs5pe", output=unet_path, quiet=False)
 
         super().__init__()
