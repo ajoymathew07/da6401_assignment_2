@@ -227,14 +227,20 @@ def train_localization(args):
     cls_ckpt = "checkpoints/classifier.pth"
     if os.path.exists(cls_ckpt):
         model.load_encoder_weights(cls_ckpt, device=str(device))
-        print(f"Loaded encoder weights from {cls_ckpt}")
+        # Freeze encoder weights - only train the regressor head
+        for param in model.encoder.parameters():
+            param.requires_grad = False
+        print(f"Loaded encoder weights from {cls_ckpt} and froze encoder")
     else:
         import gdown
         gdown.download(id="1aD-PFsrIDWMqFMd8QOBzuCEhQ1w4HN-9", output=cls_ckpt, quiet=False)
 
         if os.path.exists(cls_ckpt):
             model.load_encoder_weights(cls_ckpt, device=str(device))
-            print(f"Loaded encoder weights from {cls_ckpt} after downloading")
+            # Freeze encoder weights - only train the regressor head
+            for param in model.encoder.parameters():
+                param.requires_grad = False
+            print(f"Loaded encoder weights from {cls_ckpt} after downloading and froze encoder")
         else:
             print(f"Classifier checkpoint not found at {cls_ckpt}. Training localization model with random encoder weights.")
 
@@ -243,7 +249,8 @@ def train_localization(args):
     mse_criterion = nn.MSELoss()
     iou_criterion = IoULoss(reduction= "none")
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    # Only optimize parameters that require gradients (unfrozen parameters)
+    optimizer = torch.optim.Adam([p for p in model.parameters() if p.requires_grad], lr=args.lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
     best_val_iou = 0.0
@@ -477,6 +484,12 @@ def train_multitask(args):
     print(f"Train: {len(train_ds)} | Val : {len(val_ds)}")
 
     model = MultiTaskPerceptionModel(download= False)
+    
+    # Freeze encoder weights for multitask - only train the heads
+    for param in model.encoder.parameters():
+        param.requires_grad = False
+    print("Multitask: Encoder frozen, only training task-specific heads")
+    
     model = setup_model_for_multi_gpu(model, device)
     cls_criterion = nn.CrossEntropyLoss()
     seg_criterion = nn.CrossEntropyLoss()
@@ -491,7 +504,8 @@ def train_multitask(args):
     W_LOC = 1.0
     W_SEG = 1.0
  
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    # Only optimize parameters that require gradients (unfrozen parameters)
+    optimizer = torch.optim.Adam([p for p in model.parameters() if p.requires_grad], lr=args.lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
  
     best_combined = 0.0   # track val cls_acc + dice for checkpoint
