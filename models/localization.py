@@ -76,7 +76,9 @@ class VGG11Localizer(nn.Module):
             if k.startswith("encoder.")
         }
 
-        missing, unexpected = self.encoder.load_state_dict(encoder_state, strict=True)
+        # Handle DataParallel models
+        encoder = self.encoder.module if hasattr(self.encoder, 'module') else self.encoder
+        missing, unexpected = encoder.load_state_dict(encoder_state, strict=True)
 
         if missing:
             print(f"Warning: Missing keys in encoder state dict: {missing}")

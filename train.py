@@ -16,10 +16,23 @@ from models.vgg11 import VGG11Encoder
 
 def get_device():
     if torch.cuda.is_available():
-        return torch.device("cuda")
+        gpu_count = torch.cuda.device_count()
+        if gpu_count > 1:
+            print(f"Using {gpu_count} GPUs with DataParallel")
+            return torch.device("cuda")
+        else:
+            return torch.device("cuda")
     if torch.backends.mps.is_available():
         return torch.device("mps")
     return torch.device("cpu")
+
+
+def setup_model_for_multi_gpu(model, device):
+    """Wrap model with DataParallel if multiple GPUs are available."""
+    if torch.cuda.is_available() and torch.cuda.device_count() > 1:
+        print(f"Wrapping model with DataParallel for {torch.cuda.device_count()} GPUs")
+        model = nn.DataParallel(model)
+    return model.to(device)
 # 2) Add this utility section (near get_device or above training functions)
 def set_seed(seed: int = 42) -> None:
     random.seed(seed)
@@ -42,8 +55,10 @@ def seed_worker(worker_id: int) -> None:
 
 def save_checkpoint(model, epoch, metric, path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    # Handle DataParallel models
+    model_to_save = model.module if hasattr(model, 'module') else model
     torch.save({
-        "state_dict": model.state_dict(),
+        "state_dict": model_to_save.state_dict(),
         "epoch": epoch,
         "best_metric": metric,
     }, path)
@@ -80,7 +95,8 @@ def train_classification(args):
 
     print(f" Train: {len(train_ds)} samples, Val: {len(val_ds)} samples, Test: {len(test_ds)} samples")
 
-    model = VGG11Classifier(num_classes=37, dropout_p=args.dropout_p).to(device)
+    model = VGG11Classifier(num_classes=37, dropout_p=args.dropout_p)
+    model = setup_model_for_multi_gpu(model, device)
     print(model)
 
     criterion = nn.CrossEntropyLoss()
@@ -206,7 +222,8 @@ def train_localization(args):
                             worker_init_fn=seed_worker, generator=g)
     print(f" Train: {len(train_ds)} samples, Val: {len(val_ds)} samples")
 
-    model = VGG11Localizer(dropout_p=args.dropout_p).to(device)
+    model = VGG11Localizer(dropout_p=args.dropout_p)
+    model = setup_model_for_multi_gpu(model, device)
 
     cls_ckpt = "checkpoints/classifier.pth"
     if os.path.exists(cls_ckpt):
@@ -334,7 +351,8 @@ def train_segmentation(args):
     val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=pin_memory, worker_init_fn=seed_worker, generator=g)
     print(f" Train: {len(train_ds)} samples, Val: {len(val_ds)} samples")
 
-    model = VGG11UNet(num_classes=3, dropout_p=args.dropout_p).to(device)
+    model = VGG11UNet(num_classes=3, dropout_p=args.dropout_p)
+    model = setup_model_for_multi_gpu(model, device)
 
     cls_ckpt = "checkpoints/classifier.pth"
     if os.path.exists(cls_ckpt):
@@ -456,7 +474,8 @@ def train_multitask(args):
 
     print(f"Train: {len(train_ds)} | Val : {len(val_ds)}")
 
-    model = MultiTaskPerceptionModel(download= False).to(device)
+    model = MultiTaskPerceptionModel(download= False)
+    model = setup_model_for_multi_gpu(model, device)
     cls_criterion = nn.CrossEntropyLoss()
     seg_criterion = nn.CrossEntropyLoss()
     mse_criterion = nn.MSELoss()
