@@ -213,7 +213,14 @@ def train_localization(args):
         model.load_encoder_weights(cls_ckpt, device=str(device))
         print(f"Loaded encoder weights from {cls_ckpt}")
     else:
-        print(f"Classifier checkpoint not found at {cls_ckpt}. Training localization model with random encoder weights.")
+        import gdown
+        gdown.download(id="1aD-PFsrIDWMqFMd8QOBzuCEhQ1w4HN-9", output=cls_ckpt, quiet=False)
+
+        if os.path.exists(cls_ckpt):
+            model.load_encoder_weights(cls_ckpt, device=str(device))
+            print(f"Loaded encoder weights from {cls_ckpt} after downloading")
+        else:
+            print(f"Classifier checkpoint not found at {cls_ckpt}. Training localization model with random encoder weights.")
 
     mse_criterion = nn.MSELoss()
     iou_criterion = IoULoss(reduction= "none")
