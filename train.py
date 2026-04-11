@@ -74,6 +74,14 @@ def save_checkpoint(model, epoch, metric, path):
     print(f"  Checkpoint saved -> {path}")
 
 
+def configure_wandb_epoch_metrics() -> None:
+    """Plot train/val metrics against epoch instead of the default batch step."""
+    wandb.define_metric("epoch")
+    wandb.define_metric("train/*", step_metric="epoch")
+    wandb.define_metric("val/*", step_metric="epoch")
+    wandb.define_metric("lr", step_metric="epoch")
+
+
 def train_classification(args):
     device = get_device()
     set_seed(42)
@@ -83,6 +91,7 @@ def train_classification(args):
     wandb.init(project= args.wandb_project,
             #    name = f"task1_cls_dp{args.dropout_p}_bs{args.batch_size}_lr{args.lr}",
                config = vars(args))
+    configure_wandb_epoch_metrics()
             
     
     full_train = OxfordIIITPetDataset(root=args.data_root, split="trainval", download=True, augment=False)
@@ -259,6 +268,7 @@ def train_localization(args):
     wandb.init(project= args.wandb_project,
             #    name = f"task2_loc_dp{args.dropout_p}_bs{args.batch_size}_lr{args.lr}",
                config = vars(args))
+    configure_wandb_epoch_metrics()
     
     full_train = OxfordIIITPetDataset(root=args.data_root, split="trainval", download=True, augment=False)
     val_size = int(0.1  * len(full_train))
@@ -402,6 +412,7 @@ def train_segmentation(args):
     wandb.init(project= args.wandb_project,
             #    name = f"task3_seg_dp{args.dropout_p}_bs{args.batch_size}_lr{args.lr}",
                config = vars(args))
+    configure_wandb_epoch_metrics()
     
     full_train = OxfordIIITPetDataset(root=args.data_root, split="trainval", download=True, augment=False)
     val_size = int(0.1  * len(full_train))
@@ -522,6 +533,7 @@ def train_multitask(args):
     wandb.init(project= args.wandb_project,
             #    name = f"task4_multitask_dp{args.dropout_p}_bs{args.batch_size}_lr{args.lr}",
                config = vars(args))
+    configure_wandb_epoch_metrics()
     
     full_train = OxfordIIITPetDataset(root=args.data_root, split="trainval", download=True, augment=False)
     val_size = int(0.1  * len(full_train))
