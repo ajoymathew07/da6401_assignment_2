@@ -99,8 +99,8 @@ def train_classification(args):
  
     train_ds = D.Subset(train_full_aug, train_ds.indices)
     pin_memory = device.type == "cuda"
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=2, pin_memory=pin_memory, worker_init_fn=seed_worker, generator=g)
-    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=2, pin_memory=pin_memory, worker_init_fn=seed_worker, generator=g)
+    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=pin_memory, worker_init_fn=seed_worker, generator=g)
+    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=pin_memory, worker_init_fn=seed_worker, generator=g)
 
     print(f" Train: {len(train_ds)} samples, Val: {len(val_ds)} samples, Test: {len(test_ds)} samples")
 
@@ -273,10 +273,10 @@ def train_localization(args):
     train_ds = D.Subset(train_aug, list(train_idx))
 
     pin_memory = device.type == "cuda"
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=2, pin_memory=pin_memory,
+    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=pin_memory,
                               worker_init_fn=seed_worker, generator=g)
 
-    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=2, pin_memory=pin_memory,
+    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=pin_memory,
                             worker_init_fn=seed_worker, generator=g)
     print(f" Train: {len(train_ds)} samples, Val: {len(val_ds)} samples")
 
@@ -413,8 +413,8 @@ def train_segmentation(args):
     train_ds = D.Subset(train_aug, list(train_idx))
 
     pin_memory = device.type == "cuda"
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=2, pin_memory=pin_memory, worker_init_fn=seed_worker, generator=g)
-    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=2, pin_memory=pin_memory, worker_init_fn=seed_worker, generator=g)
+    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=pin_memory, worker_init_fn=seed_worker, generator=g)
+    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=pin_memory, worker_init_fn=seed_worker, generator=g)
     print(f" Train: {len(train_ds)} samples, Val: {len(val_ds)} samples")
 
     model = VGG11UNet(num_classes=3, dropout_p=args.dropout_p)
@@ -536,8 +536,8 @@ def train_multitask(args):
     train_ds = D.Subset(train_aug, list(train_idx))
 
     pin_memory = device.type == "cuda"
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=2, pin_memory=pin_memory, worker_init_fn=seed_worker, generator=g)
-    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=2, pin_memory=pin_memory, worker_init_fn=seed_worker,generator=g )
+    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=pin_memory, worker_init_fn=seed_worker, generator=g)
+    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=pin_memory, worker_init_fn=seed_worker,generator=g )
 
     print(f"Train: {len(train_ds)} | Val : {len(val_ds)}")
 
