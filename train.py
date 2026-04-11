@@ -246,6 +246,13 @@ def parse_args():
     parser.add_argument("--use_bn", action="store_true", help="Use batch normalization in classifier head")
     parser.add_argument("--wandb_project", type=str, default="Visual Perception Pipeline", help="WandB project name")
     parser.add_argument("--freeze_encoder", action="store_true", help="Whether to freeze encoder weights when training segmentation model")
+    parser.add_argument(
+        "--transfer_mode",
+        type=str,
+        default="full",
+        choices=["strict", "partial", "full"],
+        help="Transfer learning mode"
+    )
     return parser.parse_args()
 
 # def compute_iou_metric(pred_boxes, target_boxes, eps = 1e-6):
@@ -431,17 +438,34 @@ def train_segmentation(args):
     model = VGG11UNet(num_classes=3, dropout_p=args.dropout_p)
 
     cls_ckpt = "checkpoints/classifier.pth"
-    if os.path.exists(cls_ckpt):
-        model.load_encoder_weights(cls_ckpt, device=str(device))
+    # if os.path.exists(cls_ckpt):
+    #     model.load_encoder_weights(cls_ckpt, device=str(device))
+    #     print("Loaded pretrained encoder")
+    import gdown
 
-        if args.freeze_encoder:
-            for param in model.encoder.parameters():
+    gdown.download(id="1aD-PFsrIDWMqFMd8QOBzuCEhQ1w4HN-9", output=cls_ckpt, quiet=False)
+    model.load_encoder_weights(cls_ckpt, device=str(device))
+    print("Loaded weights from downloaded classifier")
+     
+
+    # ===== Transfer Learning Modes =====
+    if args.transfer_mode == "strict":
+        for param in model.encoder.parameters():
+            param.requires_grad = False
+        print("Mode: STRICT (encoder frozen)")
+
+    elif args.transfer_mode == "partial":
+        for name, param in model.encoder.named_parameters():
+            if "block4" in name or "block5" in name:
+                param.requires_grad = True
+            else:
                 param.requires_grad = False
-            print(" Encoder frozen - only decoder will be trained")
-        else:
-            print(" Full fine-tuning - entire network trainable")
-    else:
-        print(f" Warning: {cls_ckpt} not found - training from scratch.")
+        print("Mode: PARTIAL (last blocks trainable)")
+
+    elif args.transfer_mode == "full":
+        for param in model.encoder.parameters():
+            param.requires_grad = True
+        print("Mode: FULL (all trainable)")
 
     model = setup_model_for_multi_gpu(model, device)
     
