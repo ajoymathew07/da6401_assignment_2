@@ -15,7 +15,7 @@ class VGG11Classifier(nn.Module):
 
     # BN is placed after the FC linear transform and before the ReLU activation.
 
-    def __init__(self, num_classes: int = 37, in_channels: int = 3, dropout_p: float = 0.5):
+    def __init__(self, num_classes: int = 37, in_channels: int = 3, dropout_p: float = 0.5, use_bn: bool = True):
         """
         Initialize the VGG11Classifier model.
         Args:
@@ -26,17 +26,22 @@ class VGG11Classifier(nn.Module):
 
         super().__init__()
 
+        def maybe_bn(num_features: int) -> nn.Module:
+            return nn.BatchNorm1d(num_features) if use_bn else nn.Identity()
+
         self.encoder = VGG11Encoder(in_channels=in_channels)
 
         self.avg_pool = nn.AdaptiveAvgPool2d((7, 7)) #collapses spatial dimensions to 7 *7
 
         self.classifier = nn.Sequential(
             nn.Linear(512 * 7 * 7, 4096),
-            nn.BatchNorm1d(4096),
+            # nn.BatchNorm1d(4096),
+            maybe_bn(4096),
             nn.ReLU(inplace=True),
             CustomDropout(p=dropout_p),
             nn.Linear(4096, 4096),
-            nn.BatchNorm1d(4096),
+            # nn.BatchNorm1d(4096),
+            maybe_bn(4096),
             nn.ReLU(inplace=True),
             CustomDropout(p=dropout_p),
             nn.Linear(4096, num_classes)

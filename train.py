@@ -72,7 +72,7 @@ def train_classification(args):
     print(f"Using device: {device}")
 
     wandb.init(project= args.wandb_project,
-               name = f"task1_cls_dp{args.dropout_p}_bs{args.batch_size}_lr{args.lr}",
+            #    name = f"task1_cls_dp{args.dropout_p}_bs{args.batch_size}_lr{args.lr}",
                config = vars(args))
             
     
@@ -95,9 +95,26 @@ def train_classification(args):
 
     print(f" Train: {len(train_ds)} samples, Val: {len(val_ds)} samples, Test: {len(test_ds)} samples")
 
-    model = VGG11Classifier(num_classes=37, dropout_p=args.dropout_p)
+    model = VGG11Classifier(num_classes=37, dropout_p=args.dropout_p, use_bn=False)
     model = setup_model_for_multi_gpu(model, device)
     print(model)
+
+    # ===== Activation Hook Setup (ADD BELOW print(model)) =====
+    activations = []
+
+    def hook_fn(module, input, output):
+        activations.append(output.detach().cpu())
+
+    model_module = model.module if hasattr(model, 'module') else model
+
+    conv_count = 0
+    for m in model_module.encoder.modules():
+        if isinstance(m, nn.Conv2d):
+            conv_count += 1
+            if conv_count == 3:
+                m.register_forward_hook(hook_fn)
+                print("Hook attached to 3rd Conv layer")
+                break
 
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
@@ -110,7 +127,7 @@ def train_classification(args):
         train_loss = 0.0
         correct, total = 0, 0
 
-        for batch in train_loader:
+        for batch_idx, batch in enumerate(train_loader):
             images = batch["image"].to(device)
             labels = batch["label"].to(device)
 
@@ -119,6 +136,21 @@ def train_classification(args):
             loss = criterion(logits, labels)
             loss.backward()
             optimizer.step()
+
+            # ===== Gradient Norm (ADD HERE) =====
+            total_norm = 0
+            for p in model.parameters():
+                if p.grad is not None:
+                    total_norm += p.grad.data.norm(2).item()
+
+            # ===== Activation Histogram (log once) =====
+            if epoch == 1 and batch_idx == 0 and len(activations) > 0:
+                act = activations[-1].flatten().numpy()
+                wandb.log({
+                    "activation_histogram": wandb.Histogram(act)
+                })
+
+            wandb.log({"grad_norm": total_norm})
 
             train_loss += loss.item() * images.size(0)
             preds = logits.argmax(dim=1)
@@ -199,7 +231,7 @@ def train_localization(args):
 
     print(f"Using device: {device}")
     wandb.init(project= args.wandb_project,
-               name = f"task2_loc_dp{args.dropout_p}_bs{args.batch_size}_lr{args.lr}",
+            #    name = f"task2_loc_dp{args.dropout_p}_bs{args.batch_size}_lr{args.lr}",
                config = vars(args))
     
     full_train = OxfordIIITPetDataset(root=args.data_root, split="trainval", download=True, augment=False)
@@ -342,7 +374,7 @@ def train_segmentation(args):
     device = get_device()
     print(f"Using device: {device}")
     wandb.init(project= args.wandb_project,
-               name = f"task3_seg_dp{args.dropout_p}_bs{args.batch_size}_lr{args.lr}",
+            #    name = f"task3_seg_dp{args.dropout_p}_bs{args.batch_size}_lr{args.lr}",
                config = vars(args))
     
     full_train = OxfordIIITPetDataset(root=args.data_root, split="trainval", download=True, augment=False)
@@ -462,7 +494,7 @@ def train_multitask(args):
     print(f"Device: {device}")
     
     wandb.init(project= args.wandb_project,
-               name = f"task4_multitask_dp{args.dropout_p}_bs{args.batch_size}_lr{args.lr}",
+            #    name = f"task4_multitask_dp{args.dropout_p}_bs{args.batch_size}_lr{args.lr}",
                config = vars(args))
     
     full_train = OxfordIIITPetDataset(root=args.data_root, split="trainval", download=True, augment=False)
