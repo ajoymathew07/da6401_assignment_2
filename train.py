@@ -236,7 +236,7 @@ def train_classification(args):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train VGG11 Classifier on Oxford-IIIT Pet Dataset")
-    parser.add_argument("--task", type=str, default="classification", choices=["classification", "localization", "segmentation", "multitask"], help="Task to train")
+    parser.add_argument("--task", type=str, default="classification", choices=["classification", "localization", "segmentation", "multitask", "visualize"], help="Task to train")
     parser.add_argument("--data_root", type=str, default="./pet_data", help="Root directory for dataset")
     parser.add_argument("--epochs", type=int, default=30, help="Number of training epochs")
 
@@ -727,6 +727,64 @@ def train_multitask(args):
     wandb.finish()
     print(f"Best combined (acc+dice): {best_combined:.4f}")
 
+def visualize_feature_maps(args):
+    import matplotlib.pyplot as plt
+
+    device = get_device()
+    model = VGG11Classifier(num_classes=37, dropout_p=args.dropout_p, use_bn=args.use_bn)
+    
+    # Load trained model
+    import gdown 
+    cls_ckpt = "checkpoints/classifier.pth"
+    gdown.download(id="1aD-PFsrIDWMqFMd8QOBzuCEhQ1w4HN-9", output=cls_ckpt, quiet=False)
+    ckpt = torch.load("checkpoints/classifier.pth", map_location=device)
+    model.load_state_dict(ckpt["state_dict"])
+    model = model.to(device)
+    model.eval()
+
+    # Load ONE image
+    dataset = OxfordIIITPetDataset(root=args.data_root, split="test", download=True)
+    sample = dataset[0]
+    image = sample["image"].unsqueeze(0).to(device)
+
+    # ===== Hooks =====
+    first_layer_out = []
+    last_layer_out = []
+
+    def hook_first(module, input, output):
+        first_layer_out.append(output.detach().cpu())
+
+    def hook_last(module, input, output):
+        last_layer_out.append(output.detach().cpu())
+
+    model.encoder.block1[0][0].register_forward_hook(hook_first)   # first conv
+    model.encoder.block5[0][0].register_forward_hook(hook_last)    # last conv
+
+    # Forward pass
+    with torch.no_grad():
+        _ = model(image)
+
+    f1 = first_layer_out[0][0]   # [C,H,W]
+    f5 = last_layer_out[0][0]
+
+    # ===== Plot first 8 channels =====
+    def plot_maps(feature, title):
+        fig, axes = plt.subplots(1, 8, figsize=(16, 3))
+        for i in range(8):
+            axes[i].imshow(feature[i], cmap="viridis")
+            axes[i].axis("off")
+        plt.suptitle(title)
+        return fig
+
+    fig1 = plot_maps(f1, "First Conv Layer")
+    fig2 = plot_maps(f5, "Last Conv Layer")
+
+    wandb.init(project=args.wandb_project, name="feature_maps")
+    wandb.log({
+        "first_layer": wandb.Image(fig1),
+        "last_layer": wandb.Image(fig2)
+    })
+    wandb.finish()
 if __name__ == "__main__":
     args = parse_args()
     if args.task == "classification":
@@ -737,5 +795,7 @@ if __name__ == "__main__":
         train_segmentation(args)
     elif args.task == "multitask":
         train_multitask(args)
+    elif args.task == "visualize":
+        visualize_feature_maps(args)
     else:
         raise NotImplementedError(f"Task {args.task} not implemented yet.")
