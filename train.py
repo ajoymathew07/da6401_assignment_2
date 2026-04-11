@@ -2,6 +2,7 @@
 """
 import os
 import argparse
+import gc
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
@@ -33,6 +34,14 @@ def setup_model_for_multi_gpu(model, device):
         print(f"Wrapping model with DataParallel for {torch.cuda.device_count()} GPUs")
         model = nn.DataParallel(model)
     return model.to(device)
+
+
+def clear_memory(device: torch.device) -> None:
+    """Release Python and CUDA caches to reduce memory pressure."""
+    gc.collect()
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
+
 # 2) Add this utility section (near get_device or above training functions)
 def set_seed(seed: int = 42) -> None:
     random.seed(seed)
@@ -95,7 +104,7 @@ def train_classification(args):
 
     print(f" Train: {len(train_ds)} samples, Val: {len(val_ds)} samples, Test: {len(test_ds)} samples")
 
-    model = VGG11Classifier(num_classes=37, dropout_p=args.dropout_p, use_bn=False)
+    model = VGG11Classifier(num_classes=37, dropout_p=args.dropout_p, use_bn=args.use_bn)
     model = setup_model_for_multi_gpu(model, device)
     print(model)
 
@@ -157,6 +166,12 @@ def train_classification(args):
             correct += (preds == labels).sum().item()
             total += images.size(0)
 
+            # Free batch tensors immediately after use
+            del images, labels, logits, loss, preds
+            gc.collect()
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+
         scheduler.step()
         train_loss /= total
         train_acc = correct / total
@@ -175,6 +190,11 @@ def train_classification(args):
                 preds = logits.argmax(dim=1)
                 val_correct += (preds == labels).sum().item()
                 val_total += images.size(0)
+
+                del images, labels, logits, loss, preds
+                gc.collect()
+                if device.type == "cuda":
+                    torch.cuda.empty_cache()
         val_loss /= val_total
         val_acc = val_correct / val_total
 
@@ -195,8 +215,13 @@ def train_classification(args):
             best_val_acc = val_acc
             save_checkpoint(model, epoch, best_val_acc, path="checkpoints/classifier.pth")
 
-        
+        clear_memory(device)
+        activations.clear()
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+
     wandb.finish()
+    clear_memory(device)
     print(f"Best Val Acc: {best_val_acc:.4f}")
 
 
@@ -209,7 +234,8 @@ def parse_args():
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size for training")
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate for optimizer")
     parser.add_argument("--dropout_p", type=float, default=0.5, help="Dropout probability")
-    parser.add_argument("--wandb_project", type=str, default="", help="WandB project name")
+    parser.add_argument("--use_bn", action="store_true", help="Use batch normalization in classifier head")
+    parser.add_argument("--wandb_project", type=str, default="Visual Perception Pipeline", help="WandB project name")
     parser.add_argument("--freeze_encoder", action="store_true", help="Whether to freeze encoder weights when training segmentation model")
     return parser.parse_args()
 

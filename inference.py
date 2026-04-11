@@ -1,6 +1,7 @@
 """Inference and evaluation
 """
 import os
+import gc
 import torch
 import torch.nn as nn
 import numpy as np
@@ -34,6 +35,13 @@ def setup_model_for_multi_gpu(model, device):
         print(f"Wrapping model with DataParallel for {torch.cuda.device_count()} GPUs")
         model = nn.DataParallel(model)
     return model.to(device)
+
+
+def clear_memory(device: torch.device) -> None:
+    """Release Python and CUDA caches to reduce memory pressure."""
+    gc.collect()
+    if device.type == "cuda":
+        torch.cuda.empty_cache()
 
 
 def load_checkpoint(model, checkpoint_path, device="cpu"):
@@ -126,7 +134,7 @@ def infer_classification(args):
     print(f"Using device: {device}")
 
     # Load model
-    model = VGG11Classifier(num_classes=37, dropout_p=args.dropout_p)
+    model = VGG11Classifier(num_classes=37, dropout_p=args.dropout_p, use_bn=args.use_bn)
     model = setup_model_for_multi_gpu(model, device)
     if not load_checkpoint(model, args.classifier_path, device):
         print("Warning: Training from scratch without pretrained weights")
@@ -163,6 +171,11 @@ def infer_classification(args):
             if (i + 1) % 10 == 0:
                 print(f"  Batch {i + 1}/{len(test_loader)}")
 
+            del images, labels, logits, loss, preds
+            gc.collect()
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+
     avg_loss = total_loss / total_samples
     accuracy = total_correct / total_samples
 
@@ -170,6 +183,7 @@ def infer_classification(args):
     print(f"  Test Loss: {avg_loss:.4f}")
     print(f"  Test Accuracy: {accuracy:.4f}")
 
+    clear_memory(device)
     return {"loss": avg_loss, "accuracy": accuracy}
 
 
@@ -220,6 +234,11 @@ def infer_localization(args):
             if (i + 1) % 10 == 0:
                 print(f"  Batch {i + 1}/{len(test_loader)}")
 
+            del images, gt_boxes, preds, mse_loss, iou_per, loss, iou_metric
+            gc.collect()
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+
     avg_loss = total_loss / total_samples
     avg_iou = total_iou / total_samples
 
@@ -227,6 +246,7 @@ def infer_localization(args):
     print(f"  Test Loss: {avg_loss:.4f}")
     print(f"  Test IoU: {avg_iou:.4f}")
 
+    clear_memory(device)
     return {"loss": avg_loss, "iou": avg_iou}
 
 
@@ -277,6 +297,11 @@ def infer_segmentation(args):
             if (i + 1) % 10 == 0:
                 print(f"  Batch {i + 1}/{len(test_loader)}")
 
+            del images, gt_masks, pred_logits, loss, dice, px_acc
+            gc.collect()
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+
     avg_loss = total_loss / total_samples
     avg_dice = total_dice / total_samples
     avg_px_acc = total_px_acc / total_samples
@@ -286,6 +311,7 @@ def infer_segmentation(args):
     print(f"  Test Dice Score: {avg_dice:.4f}")
     print(f"  Test Pixel Accuracy: {avg_px_acc:.4f}")
 
+    clear_memory(device)
     return {"loss": avg_loss, "dice": avg_dice, "pixel_accuracy": avg_px_acc}
 
 
@@ -354,6 +380,11 @@ def infer_multitask(args):
             if (i + 1) % 10 == 0:
                 print(f"  Batch {i + 1}/{len(test_loader)}")
 
+            del images, labels, bboxes, masks, out, loss_cls, cls_preds, cls_correct, iou_per, loss_loc, iou_metric, loss_seg, dice
+            gc.collect()
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+
     avg_cls_loss = total_cls_loss / total_samples
     avg_loc_loss = total_loc_loss / total_samples
     avg_seg_loss = total_seg_loss / total_samples
@@ -366,6 +397,7 @@ def infer_multitask(args):
     print(f"  Localization Loss: {avg_loc_loss:.4f}, IoU: {avg_iou:.4f}")
     print(f"  Segmentation Loss: {avg_seg_loss:.4f}, Dice: {avg_dice:.4f}")
 
+    clear_memory(device)
     return {
         "cls_loss": avg_cls_loss,
         "cls_acc": avg_cls_acc,
@@ -384,6 +416,7 @@ def parse_args():
     parser.add_argument("--data_root", type=str, default="./pet_data", help="Root directory for dataset")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size for inference")
     parser.add_argument("--dropout_p", type=float, default=0.5, help="Dropout probability")
+    parser.add_argument("--use_bn", action="store_true", help="Use batch normalization in classifier head")
     parser.add_argument("--classifier_path", type=str, default="checkpoints/classifier.pth", 
                         help="Path to classifier checkpoint")
     parser.add_argument("--localizer_path", type=str, default="checkpoints/localizer.pth", 
