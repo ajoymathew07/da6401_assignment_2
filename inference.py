@@ -135,7 +135,7 @@ def infer_classification(args):
 
     # Load test dataset
     test_ds = OxfordIIITPetDataset(root=args.data_root, split="test", download=False, augment=False)
-    test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False, num_workers=4)
+    test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False, num_workers=2)
 
     print(f"Test dataset size: {len(test_ds)}")
 
@@ -188,7 +188,7 @@ def infer_localization(args):
 
     # Load test dataset
     test_ds = OxfordIIITPetDataset(root=args.data_root, split="test", download=False, augment=False)
-    test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False, num_workers=4)
+    test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False, num_workers=2)
 
     print(f"Test dataset size: {len(test_ds)}")
 
@@ -245,7 +245,7 @@ def infer_segmentation(args):
 
     # Load test dataset
     test_ds = OxfordIIITPetDataset(root=args.data_root, split="test", download=False, augment=False)
-    test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False, num_workers=4)
+    test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False, num_workers=2)
 
     print(f"Test dataset size: {len(test_ds)}")
 
@@ -301,7 +301,7 @@ def infer_multitask(args):
 
     # Load test dataset
     test_ds = OxfordIIITPetDataset(root=args.data_root, split="test", download=False, augment=False)
-    test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False, num_workers=4)
+    test_loader = DataLoader(test_ds, batch_size=args.batch_size, shuffle=False, num_workers=2)
 
     print(f"Test dataset size: {len(test_ds)}")
 
