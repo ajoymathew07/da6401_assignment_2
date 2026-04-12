@@ -911,10 +911,7 @@ def final_pipeline_showcase(args):
 
     model = MultiTaskPerceptionModel()
 
-    # ===== Load weights =====
-    import gdown
     cls_ckpt = "checkpoints/classifier.pth"
-    gdown.download(id="1aD-PFsrIDWMqFMd8QOBzuCEhQ1w4HN-9", output=cls_ckpt, quiet=False)
 
     ckpt = torch.load(cls_ckpt, map_location=device)
     model = model.to(device)
@@ -922,9 +919,9 @@ def final_pipeline_showcase(args):
 
     # ===== Your images =====
     image_paths = [
-        "/kaggle/input/test_images/image1.jpg",
-        "/kaggle/input/test_images/image2.jpg",
-        "/kaggle/input/test_images/image3.jpg",
+        "/kaggle/input/datasets/ajoymathew07/test-images/image1.jpg",
+        "/kaggle/input/datasets/ajoymathew07/test-images/image2.jpg",
+        "/kaggle/input/datasets/ajoymathew07/test-images/image3.jpg",
     ]
     wandb.init(project=args.wandb_project, name="final_showcase")
 
