@@ -236,7 +236,7 @@ def train_classification(args):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train VGG11 Classifier on Oxford-IIIT Pet Dataset")
-    parser.add_argument("--task", type=str, default="classification", choices=["classification", "localization", "segmentation", "multitask", "visualize"], help="Task to train")
+    parser.add_argument("--task", type=str, default="classification", choices=["classification", "localization", "segmentation", "multitask", "visualize", "detect"], help="Task to train")
     parser.add_argument("--data_root", type=str, default="./pet_data", help="Root directory for dataset")
     parser.add_argument("--epochs", type=int, default=30, help="Number of training epochs")
 
@@ -785,6 +785,77 @@ def visualize_feature_maps(args):
         "last_layer": wandb.Image(fig2)
     })
     wandb.finish()
+
+def visualize_detection(args):
+    import wandb
+    import torch
+    from losses.iou_loss import IoULoss
+
+    device = get_device()
+
+    from models.localization import VGG11Localizer
+    model = VGG11Localizer()
+    
+    ckpt = torch.load("checkpoints/localizer.pth", map_location=device)
+    model.load_state_dict(ckpt["state_dict"])
+    model = model.to(device)
+    model.eval()
+
+    dataset = OxfordIIITPetDataset(root=args.data_root, split="test", download=True)
+
+    iou_fn = IoULoss(reduction="none")
+
+    table = wandb.Table(columns=["image", "confidence", "iou"])
+
+    wandb.init(project=args.wandb_project, name="detection_visualization")
+
+    for i in range(10):
+        sample = dataset[i]
+        img = sample["image"].unsqueeze(0).to(device)
+        gt_box = sample["bbox"].unsqueeze(0).to(device)
+
+        with torch.no_grad():
+            pred_box = model(img)
+
+        # IoU
+        iou = (1 - iou_fn(pred_box, gt_box)).item()
+
+        # Dummy confidence (since no explicit score head)
+        confidence = 1.0 - torch.abs(pred_box - gt_box).mean().item()
+
+        # Convert image to CPU numpy
+        img_np = sample["image"].permute(1, 2, 0).numpy()
+
+        # Bounding boxes (x, y, w, h → convert to x1,y1,x2,y2)
+        def to_xyxy(box):
+            x, y, w, h = box
+            return [x, y, x + w, y + h]
+
+        gt = to_xyxy(gt_box[0].cpu().numpy())
+        pred = to_xyxy(pred_box[0].cpu().numpy())
+
+        wandb_img = wandb.Image(
+            img_np,
+            boxes={
+                "ground_truth": {
+                    "box_data": [{"position": {"minX": gt[0], "minY": gt[1], "maxX": gt[2], "maxY": gt[3]},
+                                  "class_id": 0,
+                                  "box_caption": "GT"}],
+                    "class_labels": {0: "gt"}
+                },
+                "prediction": {
+                    "box_data": [{"position": {"minX": pred[0], "minY": pred[1], "maxX": pred[2], "maxY": pred[3]},
+                                  "class_id": 1,
+                                  "box_caption": f"Pred IoU:{iou:.2f}"}],
+                    "class_labels": {1: "pred"}
+                }
+            }
+        )
+
+        table.add_data(wandb_img, confidence, iou)
+
+    wandb.log({"detection_table": table})
+    wandb.finish()
 if __name__ == "__main__":
     args = parse_args()
     if args.task == "classification":
@@ -797,5 +868,7 @@ if __name__ == "__main__":
         train_multitask(args)
     elif args.task == "visualize":
         visualize_feature_maps(args)
+    elif args.task == "detect":
+        visualize_detection(args)
     else:
         raise NotImplementedError(f"Task {args.task} not implemented yet.")
