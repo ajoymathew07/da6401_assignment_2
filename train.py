@@ -62,15 +62,16 @@ def seed_worker(worker_id: int) -> None:
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
-def save_checkpoint(model, epoch, metric, path):
+def save_checkpoint(model_or_state, epoch, metric, path):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    # Handle DataParallel models
-    model_to_save = model.module if hasattr(model, 'module') else model
-    torch.save({
-        "state_dict": model_to_save.state_dict(),
-        "epoch": epoch,
-        "best_metric": metric,
-    }, path)
+    if isinstance(model_or_state, dict):
+        state_dict = model_or_state
+    else:
+        # Handle DataParallel models
+        model_to_save = model_or_state.module if hasattr(model_or_state, 'module') else model_or_state
+        state_dict = model_to_save.state_dict()
+
+    torch.save({"state_dict": state_dict, "epoch": epoch, "best_metric": metric}, path)
     print(f"  Checkpoint saved -> {path}")
 
 

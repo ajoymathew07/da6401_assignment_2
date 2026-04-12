@@ -103,7 +103,15 @@ class _SegmentationHead(nn.Module):
 class MultiTaskPerceptionModel(nn.Module):
     """Shared-backbone multi-task model."""
 
-    def __init__(self, num_breeds: int = 37, seg_classes: int = 3, in_channels: int = 3, classifier_path: str = "classifier.pth", localizer_path: str = "localizer.pth", unet_path: str = "unet.pth"):
+    def __init__(
+        self,
+        num_breeds: int = 37,
+        seg_classes: int = 3,
+        in_channels: int = 3,
+        classifier_path: str = "checkpoints/classifier.pth",
+        localizer_path: str = "checkpoints/localizer.pth",
+        unet_path: str = "checkpoints/unet.pth",
+    ):
         """
         Initialize the shared backbone/heads using these trained weights.
         Args:
@@ -114,16 +122,28 @@ class MultiTaskPerceptionModel(nn.Module):
             localizer_path: Path to trained localizer weights.
             unet_path: Path to trained unet weights.
         """
-        import gdown
-#         https://drive.google.com/file/d/1aD-PFsrIDWMqFMd8QOBzuCEhQ1w4HN-9/view?usp=sharing
-# https://drive.google.com/file/d/1IG7osoFWBIOgWlqs7o-801Ai_kMyNzW-/view?usp=sharing
+        def _ensure_checkpoint(path: str, file_id: str) -> None:
+            directory = os.path.dirname(path)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+            if os.path.exists(path):
+                return
+            try:
+                import gdown
+            except ImportError as exc:
+                raise FileNotFoundError(
+                    f"Checkpoint not found at {path} and gdown is unavailable for download."
+                ) from exc
 
-# https://drive.google.com/file/d/1ctbJxqT0gYHCME2rB5qa2y7dPzdZIEGR/view?usp=sharing
-# https://drive.google.com/file/d/1j2f8IfO4Cf3trhfXl00sT34wZOiVtPDz/view?usp=sharing
-        gdown.download(id="1aD-PFsrIDWMqFMd8QOBzuCEhQ1w4HN-9", output=classifier_path, quiet=False)
-        gdown.download(id="1IG7osoFWBIOgWlqs7o-801Ai_kMyNzW-", output=localizer_path, quiet=False)
-        # gdown.download(id="1ctbJxqT0gYHCME2rB5qa2y7dPzdZIEGR", output=unet_path, quiet=False)
-        gdown.download(id="1j2f8IfO4Cf3trhfXl00sT34wZOiVtPDz", output=unet_path, quiet=False)
+            print(f"Checkpoint not found at {path}. Downloading...")
+            ok = gdown.download(id=file_id, output=path, quiet=False)
+            if not ok or not os.path.exists(path):
+                raise FileNotFoundError(f"Failed to obtain checkpoint at {path}.")
+
+        # Keep paths relative and only download when local checkpoints are missing.
+        _ensure_checkpoint(classifier_path, "1aD-PFsrIDWMqFMd8QOBzuCEhQ1w4HN-9")
+        _ensure_checkpoint(localizer_path, "1IG7osoFWBIOgWlqs7o-801Ai_kMyNzW-")
+        _ensure_checkpoint(unet_path, "1j2f8IfO4Cf3trhfXl00sT34wZOiVtPDz")
 
         super().__init__()
 
