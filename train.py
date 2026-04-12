@@ -973,8 +973,12 @@ def final_pipeline_showcase(args):
         )
 
         results.append(wandb_img)
+    table = wandb.Table(columns=["image"])
 
-    wandb.log({"final_outputs": results})
+    for img in results:
+        table.add_data(img)
+
+    wandb.log({"final_outputs": table})
     wandb.finish()
     
 if __name__ == "__main__":
