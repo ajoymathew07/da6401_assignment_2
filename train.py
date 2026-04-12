@@ -795,7 +795,10 @@ def visualize_detection(args):
 
     from models.localization import VGG11Localizer
     model = VGG11Localizer()
-    
+
+    import gdown
+    ckpt_path = "checkpoints/localizer.pth"
+    gdown.download(id="1IG7osoFWBIOgWlqs7o-801Ai_kMyNzW-", output=ckpt_path, quiet=False)
     ckpt = torch.load("checkpoints/localizer.pth", map_location=device)
     model.load_state_dict(ckpt["state_dict"])
     model = model.to(device)
