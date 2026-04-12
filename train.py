@@ -848,7 +848,7 @@ def visualize_detection(args):
             pred_box = model(img)
 
         iou = float((1 - iou_fn(pred_box, gt_box)).item())
-        confidence = float(1.0 - torch.abs(pred_box - gt_box).mean().item())
+        confidence = float(torch.exp(-torch.abs(pred_box - gt_box).mean()).item())
 
         img_np = sample["image"].permute(1, 2, 0).cpu().numpy()
         img_np = (img_np * 255).astype("uint8")
