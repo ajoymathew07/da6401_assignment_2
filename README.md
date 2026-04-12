@@ -1,3 +1,7 @@
+# Submission
+Report Link: https://api.wandb.ai/links/cs23b101-indian-institute-of-technology-madras/op0w9x9o
+Github Link: https://github.com/ajoymathew07/da6401_assignment_2.git
+
 # DA6401 Assignment-2 Skeleton Guide
 
 This repository is an instructional skeleton for building the complete visual perception pipeline on Oxford-IIIT Pet.
