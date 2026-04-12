@@ -236,7 +236,9 @@ def train_classification(args):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train VGG11 Classifier on Oxford-IIIT Pet Dataset")
-    parser.add_argument("--task", type=str, default="classification", choices=["classification", "localization", "segmentation", "multitask", "visualize", "detect"], help="Task to train")
+    parser.add_argument("--task", type=str, default="classification",
+                         choices=["classification", "localization", "segmentation", "multitask", "visualize", "detect", "showcase"], 
+                         help="Task to train")
     parser.add_argument("--data_root", type=str, default="./pet_data", help="Root directory for dataset")
     parser.add_argument("--epochs", type=int, default=30, help="Number of training epochs")
 
@@ -885,6 +887,99 @@ def visualize_detection(args):
 
     wandb.log({"detection_table": table})
     wandb.finish()
+
+def final_pipeline_showcase(args):
+    import wandb
+    import torch
+    import numpy as np
+    from PIL import Image
+
+    # ===== Preprocessing (NO torchvision) =====
+    def preprocess_image(path):
+        img = Image.open(path).convert("RGB")
+        img = img.resize((224, 224))
+
+        img_np = np.array(img).astype("float32") / 255.0   # normalize
+        img_np = np.transpose(img_np, (2, 0, 1))           # HWC → CHW
+
+        img_tensor = torch.tensor(img_np).unsqueeze(0)     # [1,3,224,224]
+        return img, img_tensor
+
+    device = get_device()
+
+    from models.multitask import MultiTaskPerceptionModel
+
+    model = MultiTaskPerceptionModel()
+
+    # ===== Load weights =====
+    import gdown
+    cls_ckpt = "checkpoints/classifier.pth"
+    gdown.download(id="1aD-PFsrIDWMqFMd8QOBzuCEhQ1w4HN-9", output=cls_ckpt, quiet=False)
+
+    ckpt = torch.load(cls_ckpt, map_location=device)
+    model = model.to(device)
+    model.eval()
+
+    # ===== Your images =====
+    image_paths = [
+        "/kaggle/input/test_images/image1.jpg",
+        "/kaggle/input/test_images/image2.jpg",
+        "/kaggle/input/test_images/image3.jpg",
+    ]
+    wandb.init(project=args.wandb_project, name="final_showcase")
+
+    results = []
+
+    for path in image_paths:
+        # ===== preprocess =====
+        img_pil, img_t = preprocess_image(path)
+        img_t = img_t.to(device)
+
+        with torch.no_grad():
+            out = model(img_t)
+
+        # ===== outputs =====
+        pred_box = out["localization"][0].cpu().numpy()
+        pred_mask = out["segmentation"].argmax(dim=1)[0].cpu().numpy()
+        pred_cls = int(out["classification"].argmax(dim=1).item())
+
+        img_np = np.array(img_pil)  # already resized
+
+        def to_xyxy(box):
+            x, y, w, h = box
+            return [float(x), float(y), float(x + w), float(y + h)]
+
+        pred = to_xyxy(pred_box)
+
+        wandb_img = wandb.Image(
+            img_np,
+            boxes={
+                "prediction": {
+                    "box_data": [{
+                        "position": {
+                            "minX": pred[0],
+                            "minY": pred[1],
+                            "maxX": pred[2],
+                            "maxY": pred[3]
+                        },
+                        "class_id": pred_cls,
+                        "box_caption": f"class:{pred_cls}"
+                    }],
+                    "class_labels": {pred_cls: "pred"}
+                }
+            },
+            masks={
+                "prediction": {
+                    "mask_data": pred_mask
+                }
+            }
+        )
+
+        results.append(wandb_img)
+
+    wandb.log({"final_outputs": results})
+    wandb.finish()
+    
 if __name__ == "__main__":
     args = parse_args()
     if args.task == "classification":
@@ -899,5 +994,7 @@ if __name__ == "__main__":
         visualize_feature_maps(args)
     elif args.task == "detect":
         visualize_detection(args)
+    elif args.task == "showcase":
+        final_pipeline_showcase(args)
     else:
         raise NotImplementedError(f"Task {args.task} not implemented yet.")
