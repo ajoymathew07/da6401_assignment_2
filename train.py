@@ -606,7 +606,7 @@ def train_multitask(args):
 
     print(f"Train: {len(train_ds)} | Val : {len(val_ds)}")
 
-    model = MultiTaskPerceptionModel(download= True)
+    model = MultiTaskPerceptionModel()
     
     # Freeze encoder weights for multitask - only train the heads
     for param in model.encoder.parameters():
