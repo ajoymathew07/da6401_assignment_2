@@ -820,22 +820,20 @@ def visualize_detection(args):
         with torch.no_grad():
             pred_box = model(img)
 
-        # IoU
-        iou = (1 - iou_fn(pred_box, gt_box)).item()
+        iou = float((1 - iou_fn(pred_box, gt_box)).item())
+        confidence = float(1.0 - torch.abs(pred_box - gt_box).mean().item())
 
-        # Dummy confidence (since no explicit score head)
-        confidence = 1.0 - torch.abs(pred_box - gt_box).mean().item()
+        img_np = sample["image"].permute(1, 2, 0).cpu().numpy()
+        img_np = (img_np * 255).astype("uint8")
 
-        # Convert image to CPU numpy
-        img_np = sample["image"].permute(1, 2, 0).numpy()
 
         # Bounding boxes (x, y, w, h → convert to x1,y1,x2,y2)
         def to_xyxy(box):
             x, y, w, h = box
             return [x, y, x + w, y + h]
 
-        gt = to_xyxy(gt_box[0].cpu().numpy())
-        pred = to_xyxy(pred_box[0].cpu().numpy())
+        gt = [float(x) for x in to_xyxy(gt_box[0].cpu().numpy())]
+        pred = [float(x) for x in to_xyxy(pred_box[0].cpu().numpy())]
 
         wandb_img = wandb.Image(
             img_np,
