@@ -506,12 +506,39 @@ def train_segmentation(args):
         model.eval()
         val_loss , val_dice_sum, val_px_sum, nv = 0.0, 0.0, 0.0, 0
         with torch.no_grad():
-            for batch in val_loader:
+            for batch_idx, batch in enumerate(val_loader):
                 images = batch["image"].to(device)
                 gt_masks = batch["mask"].to(device)
 
                 pred_logits = model(images)
                 loss = criterion(pred_logits, gt_masks)
+                # ===== Log sample predictions (ONLY first batch, first epoch) =====
+                if epoch == args.epochs and batch_idx == 0:
+                    preds = pred_logits.argmax(dim=1)
+
+                    images_np = images[:5].cpu()
+                    gt_np = gt_masks[:5].cpu()
+                    pred_np = preds[:5].cpu()
+
+                    vis_list = []
+                    for i in range(min(5, images_np.size(0))):
+                        img = images_np[i].permute(1, 2, 0).numpy()
+                        img = (img * 255).astype("uint8")
+
+                        gt = gt_np[i].numpy()
+                        pred = pred_np[i].numpy()
+
+                        vis_list.append(
+                            wandb.Image(
+                                img,
+                                masks={
+                                    "ground_truth": {"mask_data": gt},
+                                    "prediction": {"mask_data": pred},
+                                }
+                            )
+                        )
+
+                    wandb.log({"segmentation_samples": vis_list})
 
                 bs = images.size(0)
                 val_loss += loss.item() * bs
